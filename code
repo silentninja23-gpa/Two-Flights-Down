@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Two Flights Down - 2D Edition</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap');
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050508;
+            color: #e2e8f0;
+            font-family: 'Share Tech Mono', monospace;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #game-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            image-rendering: pixelated;
+        }
+
+        /* CRT Scanlines & Grain Effects */
+        .crt-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.4) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 3px, 6px 100%;
+            z-index: 10;
+        }
+
+        .vignette {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            box-shadow: 0 0 140px rgba(0, 0, 0, 0.95) inset;
+            pointer-events: none;
+            z-index: 11;
+        }
+
+        .glitch-text {
+            font-family: 'VT323', monospace;
+            text-shadow: 2px 0 #dc2626, -2px 0 #0284c7;
+        }
+
+        /* Virtual D-Pad / Controls for Touch */
+        .touch-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            backdrop-filter: blur(4px);
+            touch-action: manipulation;
+        }
+        .touch-btn:active {
+            background: rgba(239, 68, 68, 0.3);
+            border-color: #ef4444;
+        }
+
+        /* Puzzle Modal overlay styling */
+        .puzzle-modal {
+            background: rgba(10, 10, 15, 0.95);
+            border: 2px solid #dc2626;
+            box-shadow: 0 0 30px rgba(220, 38, 38, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-black">
+
+    <div id="game-container" class="relative w-full h-full">
+        <canvas id="game-canvas"></canvas>
+
+        <!-- CRT & Atmosphere FX -->
+        <div class="crt-overlay"></div>
+        <div class="vignette"></div>
+
+        <!-- HUD Header -->
+        <div id="hud" class="absolute top-5 left-6 z-20 pointer-events-none flex flex-col gap-2">
+            <div id="floor-indicator" class="text-3xl font-black tracking-widest text-red-600 glitch-text">FLOOR 0</div>
+            
+            <!-- Sanity / Health Meter -->
+            <div class="flex items-center gap-2 bg-stone-950/80 p-2 rounded-lg border border-red-900/50 backdrop-blur-sm w-64">
+                <i class="fa-solid fa-brain text-red-500 text-sm"></i>
+                <div class="flex-1">
+                    <div class="flex justify-between text-[10px] font-mono text-stone-300 mb-1">
+                        <span>SANITY STABILITY</span>
+                        <span id="sanity-val" class="text-red-400 font-bold">100%</span>
+                    </div>
+                    <div class="w-full h-2.5 bg-stone-900 rounded-full overflow-hidden border border-stone-800">
+                        <div id="sanity-bar" class="h-full bg-red-600 transition-all duration-300 rounded-full" style="width: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="status-subtext" class="text-xs uppercase tracking-wider text-stone-400 font-mono bg-black/60 px-3 py-1.5 rounded border border-stone-800 max-w-sm backdrop-blur-sm">
+                STATUS: DOOR LOCKED — SOLVE FLOOR PUZZLE
+            </div>
+        </div>
+
+        <!-- Interactive Prompt Floating Banner -->
+        <div id="interactive-prompt" class="hidden absolute bottom-24 left-1/2 -translate-x-1/2 z-20 font-mono flex items-center gap-3 bg-stone-950/90 px-5 py-2.5 rounded-xl border border-red-500/50 backdrop-blur-md shadow-2xl">
+            <span class="bg-red-600 text-white font-bold px-2.5 py-1 rounded text-xs shadow-inner" id="interact-key">E / TAP</span>
+            <span id="interact-text" class="text-stone-200 text-sm tracking-wide">INSPECT ANOMALY PUZZLE</span>
+        </div>
+
+        <!-- Interactive Puzzle Modal Overlay -->
+        <div id="puzzle-modal" class="hidden absolute inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+            <div class="puzzle-modal max-w-md w-full p-6 rounded-2xl flex flex-col gap-4 text-stone-200 font-mono relative">
+                <button id="close-puzzle-btn" class="absolute top-4 right-4 text-stone-400 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+                
+                <h3 id="puzzle-title" class="text-xl font-bold text-red-500 glitch-text tracking-wide border-b border-stone-800 pb-2">FLOOR PUZZLE</h3>
+                <p id="puzzle-instructions" class="text-xs text-stone-400 leading-relaxed">Solve the mechanism to align local reality and disengage the landing lock.</p>
+
+                <!-- Dynamic Container for active puzzle UI -->
+                <div id="puzzle-content" class="w-full bg-stone-950/80 p-4 rounded-xl border border-stone-800 my-2 flex flex-col items-center justify-center min-h-[160px]">
+                    <!-- Injected via JavaScript -->
+                </div>
+
+                <div id="puzzle-status" class="text-xs font-bold text-center h-5 text-amber-400 tracking-wider"></div>
+            </div>
+        </div>
+
+        <!-- Touch / On-screen Controls for Mobile -->
+        <div id="mobile-controls" class="hidden absolute bottom-6 inset-x-6 z-30 flex justify-between items-end pointer-events-none">
+            <div class="flex gap-2 pointer-events-auto">
+                <button id="btn-left" class="touch-btn w-16 h-16 flex items-center justify-center text-white text-xl active:scale-95 transition-transform"><i class="fa-solid fa-arrow-left"></i></button>
+                <button id="btn-right" class="touch-btn w-16 h-16 flex items-center justify-center text-white text-xl active:scale-95 transition-transform"><i class="fa-solid fa-arrow-right"></i></button>
+            </div>
+            <div class="flex gap-2 pointer-events-auto">
+                <button id="btn-action" class="touch-btn w-20 h-16 flex items-center justify-center text-red-400 font-bold text-sm tracking-wider active:scale-95 transition-transform border-red-500/40">INTERACT</button>
+            </div>
+        </div>
+
+        <!-- Start Overlay -->
+        <div id="start-screen" class="absolute inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md transition-opacity duration-700 p-4">
+            <div class="max-w-md w-full bg-stone-900/90 border border-red-900/60 p-7 rounded-2xl shadow-2xl text-center flex flex-col items-center gap-5">
+                <div>
+                    <h1 class="text-5xl font-black tracking-widest text-red-600 glitch-text mb-1">TWO FLIGHTS DOWN</h1>
+                    <p class="text-xs font-mono tracking-widest text-stone-400 uppercase">2D Side-Scrolling Horror</p>
+                </div>
+
+                <div class="w-full h-px bg-gradient-to-r from-transparent via-red-800/60 to-transparent"></div>
+
+                <div class="text-left text-xs text-stone-300 space-y-2 font-mono bg-black/70 p-4 rounded-xl border border-stone-800 w-full">
+                    <p class="text-red-500 font-bold uppercase tracking-wider mb-1"><i class="fa-solid fa-triangle-exclamation mr-1.5"></i>DESCENT RULES:</p>
+                    <p>• Walk down the stairwell landings. Each lower door is <span class="text-red-400 font-semibold">LOCKED</span>.</p>
+                    <p>• Search each landing and inspect its <span class="text-amber-400 font-semibold">ANOMALY</span> to unlock the exit door.</p>
+                    <p>• Turn back if reality distorts too heavily... or press forward.</p>
+                </div>
+
+                <div class="w-full text-[11px] font-mono text-stone-400 bg-stone-800/40 p-3 rounded-lg border border-stone-700/50 text-left">
+                    <span class="text-stone-200 font-bold block mb-1">CONTROLS:</span>
+                    A/D or Left/Right Arrows — Move<br>
+                    E / Space / Mouse Click — Inspect / Open Door<br>
+                    Touch Buttons — Mobile Play
+                </div>
+
+                <button id="start-btn" class="w-full py-3.5 bg-red-700 hover:bg-red-600 text-white font-mono font-bold tracking-widest text-sm rounded-xl shadow-lg hover:shadow-red-900/50 transition-all duration-300 border border-red-400/30 active:scale-95">
+                    BEGIN DESCENT
+                </button>
+            </div>
+        </div>
+
+        <!-- End Overlay -->
+        <div id="end-screen" class="hidden absolute inset-0 z-50 flex items-center justify-center bg-black/95 transition-opacity duration-1000 p-4">
+            <div class="max-w-md w-full text-center space-y-5 bg-stone-900/90 p-8 rounded-2xl border border-red-900/60 shadow-2xl">
+                <h2 id="end-title" class="text-4xl text-red-600 font-mono tracking-widest glitch-text">THE BOTTOM REACHED</h2>
+                <p id="end-desc" class="text-stone-300 font-mono text-xs leading-relaxed border-y border-stone-800 py-5">
+                    You inspected every anomaly and descended past where the floor plan ends. The stairwell above you has flattened into concrete walls. You are stranded below ground.
+                </p>
+                <button id="restart-btn" class="w-full py-3 bg-stone-800 hover:bg-stone-700 text-stone-200 font-mono tracking-wider rounded-lg border border-stone-600">
+                    RESTART DESCENT
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* --- PROCEDURAL AUDIO SYNTHESIZER --- */
+        class HorrorAudioEngine {
+            constructor() {
+                this.ctx = null;
+                this.humOsc = null;
+                this.humOsc2 = null;
+                this.humGain = null;
+                this.droneFilter = null;
+                this.initialized = false;
+            }
+
+            init() {
+                if (this.initialized) return;
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioCtx();
+
+                this.humOsc = this.ctx.createOscillator();
+                this.humOsc2 = this.ctx.createOscillator();
+                this.humGain = this.ctx.createGain();
+
+                this.humOsc.type = 'sawtooth';
+                this.humOsc.frequency.setValueAtTime(45, this.ctx.currentTime);
+
+                this.humOsc2.type = 'sine';
+                this.humOsc2.frequency.setValueAtTime(47.5, this.ctx.currentTime);
+
+                this.droneFilter = this.ctx.createBiquadFilter();
+                this.droneFilter.type = 'lowpass';
+                this.droneFilter.frequency.setValueAtTime(120, this.ctx.currentTime);
+
+                this.humGain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+
+                this.humOsc.connect(this.droneFilter);
+                this.humOsc2.connect(this.droneFilter);
+                this.droneFilter.connect(this.humGain);
+                this.humGain.connect(this.ctx.destination);
+
+                this.humOsc.start();
+                this.humOsc2.start();
+                this.initialized = true;
+            }
+
+            playFootstep(depth) {
+                if (!this.initialized || this.ctx.state !== 'running') return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                const filter = this.ctx.createBiquadFilter();
+
+                const baseFreq = Math.max(30, 90 - depth * 8);
+                osc.type = depth > 3 ? 'triangle' : 'sine';
+                osc.frequency.setValueAtTime(baseFreq + (Math.random() * 10 - 5), this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(10, this.ctx.currentTime + 0.1);
+
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(220, this.ctx.currentTime);
+
+                gain.gain.setValueAtTime(0.18, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+
+                osc.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.11);
+            }
+
+            playDoorUnlock() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(200, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(50, this.ctx.currentTime + 0.3);
+
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.31);
+            }
+
+            playCreak() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                const freq = 160 + Math.random() * 150;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(freq - 90, this.ctx.currentTime + 0.5);
+
+                gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 0.5);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.52);
+            }
+
+            playAnomalyDiscovered() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(520, this.ctx.currentTime + 0.6);
+
+                gain.gain.setValueAtTime(0.01, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.25, this.ctx.currentTime + 0.2);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.7);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.72);
+            }
+
+            playSanityDamage() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.4);
+
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.4);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.42);
+            }
+
+            updateAmbient(floorNum) {
+                if (!this.initialized) return;
+                const targetFreq = Math.max(20, 45 - floorNum * 4);
+                this.humOsc.frequency.setTargetAtTime(targetFreq, this.ctx.currentTime, 1.0);
+                this.droneFilter.frequency.setTargetAtTime(120 + floorNum * 35, this.ctx.currentTime, 1.0);
+            }
+        }
+
+        const audio = new HorrorAudioEngine();
+
+        /* --- CANVAS & ENGINE SETUP --- */
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        /* --- GAME CONSTANTS & STATE --- */
+        const LEVEL_WIDTH = 1200;
+        const GROUND_Y_OFFSET = 180;
+
+        let isStarted = false;
+        let isGameOver = false;
+        let currentFloor = 0;
+        let sanity = 100;
+        const maxSanity = 100;
+        const TOTAL_FLOORS = 20;
+        const floorsMap = {};
+
+        function damageSanity(amount) {
+            sanity = Math.max(0, sanity - amount);
+            audio.playSanityDamage();
+
+            // Update UI
+            const bar = document.getElementById('sanity-bar');
+            const val = document.getElementById('sanity-val');
+            if (bar && val) {
+                bar.style.width = `${sanity}%`;
+                val.innerText = `${sanity}%`;
+            }
+
+            // Screen glitch visual impact
+            const container = document.getElementById('game-container');
+            container.classList.add('animate-ping');
+            setTimeout(() => container.classList.remove('animate-ping'), 200);
+
+            const status = document.getElementById('puzzle-status');
+            if (status) {
+                status.innerText = `WRONG ANSWER! SANITY DAMAGED (-${amount}%)`;
+                status.className = "text-xs font-bold text-center h-5 text-red-500 tracking-wider animate-bounce";
+            }
+
+            if (sanity <= 0) {
+                triggerGameOver("SANITY LOST", "Your mind succumbed to the anomalies of the lower stairwell landings. You collapsed into the darkness.");
+            }
+        }
+
+        function getFloor(floorIndex) {
+            if (!floorsMap[floorIndex]) {
+                floorsMap[floorIndex] = new FloorData(floorIndex);
+            }
+            return floorsMap[floorIndex];
+        }
+
+        const player = {
+            x: 120,
+            y: 0,
+            width: 28,
+            height: 64,
+            vx: 0,
+            speed: 3.2,
+            facingLeft: false,
+            animTimer: 0,
+            isMoving: false,
+            flashlightAngle: 0
+        };
+
+        const keys = { Left: false, Right: false, Interact: false };
+
+        /* --- FLOOR ANOMALIES & STRUCTURE DATA --- */
+        class FloorData {
+            constructor(floorIndex) {
+                this.index = floorIndex;
+                this.doorLocked = true;
+                this.doorOpened = false;
+                this.anomalySolved = false;
+
+                // Environment coordinates
+                this.doorX = 1040;
+                this.signX = 180;
+                this.anomalyX = 600;
+
+                // Anomaly descriptions & dynamic properties
+                this.setupFloorTraits();
+            }
+
+            setupFloorTraits() {
+                switch(this.index) {
+                    case 0:
+                        this.signText = "FLOOR 0 - ENTRANCE";
+                        this.anomalyPrompt = "SWIPE KEYCARD";
+                        this.anomalyMessage = "Security clearance confirmed.";
+                        this.anomalyType = "keycard";
+                        break;
+                    case 1:
+                        this.signText = "FLOOR L1";
+                        this.anomalyPrompt = "BALANCE VOLTAGE";
+                        this.anomalyMessage = "Power balanced to 120V.";
+                        this.anomalyType = "breaker";
+                        this.flickerLight = true;
+                        break;
+                    case 2:
+                        this.signText = "FLOOR 2 ?";
+                        this.anomalyPrompt = "DECODE CIPHER";
+                        this.anomalyMessage = "Stencil cipher realigned.";
+                        this.anomalyType = "cipher";
+                        break;
+                    case 3:
+                        this.signText = "RESONANCE";
+                        this.anomalyPrompt = "MATCH FREQUENCY";
+                        this.anomalyMessage = "Frequency harmonic stabilized.";
+                        this.anomalyType = "orb";
+                        this.foggy = true;
+                        break;
+                    case 4:
+                        this.signText = "BEHIND YOU";
+                        this.anomalyPrompt = "ALIGN MIRROR";
+                        this.anomalyMessage = "Silhouette illuminated.";
+                        this.anomalyType = "mirrors";
+                        this.darkness = true;
+                        break;
+                    case 5:
+                        this.signText = "LOOP // 05";
+                        this.anomalyPrompt = "RECONNECT CIRCUIT";
+                        this.anomalyMessage = "Circuit loop bypassed.";
+                        this.anomalyType = "circuit";
+                        break;
+                    case 6:
+                        this.signText = "PRESSURE CRITICAL";
+                        this.anomalyPrompt = "RELEASE VALVES";
+                        this.anomalyMessage = "Pressure equilibrium restored.";
+                        this.anomalyType = "valves";
+                        break;
+                    case 7:
+                        this.signText = "MEMORY BANK";
+                        this.anomalyPrompt = "REPEAT KEYPAD PATTERN";
+                        this.anomalyMessage = "Memory matrix accepted.";
+                        this.anomalyType = "keypad";
+                        break;
+                    case 8:
+                        this.signText = "ECHO CHAMBER";
+                        this.anomalyPrompt = "CALIBRATE PENDULUM";
+                        this.anomalyMessage = "Pendulum synced to real space.";
+                        this.anomalyType = "pendulum";
+                        break;
+                    case 9:
+                        this.signText = "PHASE DRIFT";
+                        this.anomalyPrompt = "ALIGN PHASE WAVE";
+                        this.anomalyMessage = "Phase offset zeroed out.";
+                        this.anomalyType = "phasewave";
+                        break;
+                    case 10:
+                        this.signText = "STATIC SUB-LEVEL";
+                        this.anomalyPrompt = "DECODE MORSE CODE";
+                        this.anomalyMessage = "Signal transmission decrypted.";
+                        this.anomalyType = "morse";
+                        this.flickerLight = true;
+                        break;
+                    case 11:
+                        this.signText = "OPTICAL SHIFT";
+                        this.anomalyPrompt = "SCAN UV FREQUENCY";
+                        this.anomalyMessage = "Hidden pattern revealed.";
+                        this.anomalyType = "uvscan";
+                        break;
+                    case 12:
+                        this.signText = "GRAVITY WELL";
+                        this.anomalyPrompt = "ALIGN GRAVITY DIAL";
+                        this.anomalyMessage = "Gravity vector stabilized.";
+                        this.anomalyType = "gravity";
+                        break;
+                    case 13:
+                        this.signText = "OXYGEN DEPRIVATION";
+                        this.anomalyPrompt = "FLUSH O2 SCRUBBERS";
+                        this.anomalyMessage = "Oxygen scrubbers activated.";
+                        this.anomalyType = "oxygen";
+                        this.foggy = true;
+                        break;
+                    case 14:
+                        this.signText = "QUANTUM ENTANGLEMENT";
+                        this.anomalyPrompt = "STABILIZE PARTICLES";
+                        this.anomalyMessage = "Quantum flux locked.";
+                        this.anomalyType = "quantum";
+                        break;
+                    case 15:
+                        this.signText = "THERMAL LEAK";
+                        this.anomalyPrompt = "COOL CORE TEMP";
+                        this.anomalyMessage = "Core temperature normalized.";
+                        this.anomalyType = "thermal";
+                        break;
+                    case 16:
+                        this.signText = "TIME DILATION";
+                        this.anomalyPrompt = "STOP DIGITAL CLOCK";
+                        this.anomalyMessage = "Chronometer synchronized.";
+                        this.anomalyType = "chronometer";
+                        break;
+                    case 17:
+                        this.signText = "NEURAL DECAY";
+                        this.anomalyPrompt = "MATCH PATTERN GRID";
+                        this.anomalyMessage = "Neural link stabilized.";
+                        this.anomalyType = "neuralgrid";
+                        break;
+                    case 18:
+                        this.signText = "SECTOR NOISE";
+                        this.anomalyPrompt = "TUNE AUDIO EQUALIZER";
+                        this.anomalyMessage = "Acoustic distortion filtered.";
+                        this.anomalyType = "equalizer";
+                        break;
+                    case 19:
+                    default:
+                        this.signText = "THE ABYSS THRESHOLD";
+                        this.anomalyPrompt = "MASTER SYSTEM OVERRIDE";
+                        this.anomalyMessage = "Final gate disengaged.";
+                        this.anomalyType = "terminal";
+                        this.crimson = true;
+                        break;
+                }
+            }
+        }
+
+        /* --- INTERACTION & PUZZLE SYSTEM --- */
+        let activeInteractTarget = null;
+        let isPuzzleOpen = false;
+
+        function updateHUDStatus(message) {
+            const statusEl = document.getElementById('status-subtext');
+            if (statusEl) {
+                statusEl.innerText = message;
+            }
+        }
+
+        function checkInteractions() {
+            if (isPuzzleOpen) return;
+            const floor = getFloor(currentFloor);
+            const promptEl = document.getElementById('interactive-prompt');
+            const interactText = document.getElementById('interact-text');
+
+            activeInteractTarget = null;
+
+            const distAnomaly = Math.abs(player.x - floor.anomalyX);
+            const distDoor = Math.abs(player.x - floor.doorX);
+
+            if (distAnomaly < 50 && !floor.anomalySolved) {
+                activeInteractTarget = 'anomaly';
+                interactText.innerText = floor.anomalyPrompt;
+                promptEl.classList.remove('hidden');
+            } else if (distDoor < 50) {
+                activeInteractTarget = 'door';
+                interactText.innerText = floor.doorLocked ? "TRY DOOR (LOCKED)" : "PROCEED DOWN STAIRS";
+                promptEl.classList.remove('hidden');
+            } else {
+                promptEl.classList.add('hidden');
+            }
+        }
+
+        function handleInteraction() {
+            if (!activeInteractTarget || !isStarted || isGameOver || isPuzzleOpen) return;
+
+            const floor = getFloor(currentFloor);
+
+            if (activeInteractTarget === 'anomaly') {
+                openPuzzleModal(floor);
+            } else if (activeInteractTarget === 'door') {
+                if (floor.doorLocked) {
+                    audio.playCreak();
+                    updateHUDStatus("DOOR IS LOCKED! Solve this floor's puzzle first.");
+                } else {
+                    audio.playDoorUnlock();
+                    floor.doorOpened = true;
+                    descendToNextFloor();
+                }
+            }
+        }
+
+        function openPuzzleModal(floor) {
+            isPuzzleOpen = true;
+            const modal = document.getElementById('puzzle-modal');
+            const title = document.getElementById('puzzle-title');
+            const instructions = document.getElementById('puzzle-instructions');
+            const content = document.getElementById('puzzle-content');
+            const status = document.getElementById('puzzle-status');
+
+            status.innerText = "";
+            modal.classList.remove('hidden');
+
+            switch(floor.anomalyType) {
+                case 'keycard':
+                    title.innerText = "SECURITY CARD READER";
+                    instructions.innerText = "Click 'SWIPE CARD' when the indicator turns GREEN.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-4 w-full">
+                            <div id="card-light" class="w-8 h-8 rounded-full bg-red-600 border-2 border-stone-600 transition-colors"></div>
+                            <button id="btn-swipe" class="px-6 py-2 bg-red-700 text-white rounded-lg text-xs hover:bg-red-600">SWIPE CARD</button>
+                        </div>
+                    `;
+                    let isGreen = false;
+                    const light = document.getElementById('card-light');
+                    const interval = setInterval(() => {
+                        if (!isPuzzleOpen) { clearInterval(interval); return; }
+                        isGreen = Math.random() > 0.5;
+                        light.className = `w-8 h-8 rounded-full ${isGreen ? 'bg-green-500 shadow-lg shadow-green-500/50' : 'bg-red-600'} border-2 border-stone-600 transition-colors`;
+                    }, 800);
+
+                    document.getElementById('btn-swipe').onclick = () => {
+                        clearInterval(interval);
+                        if (isGreen) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(15);
+                        }
+                    };
+                    break;
+
+                case 'breaker':
+                    title.innerText = "VOLTAGE BREAKER PANEL";
+                    instructions.innerText = "Toggle switches to reach EXACTLY 120V. Submitting wrong total reduces sanity.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-3 w-full">
+                            <div id="voltage-display" class="text-2xl font-black text-amber-500">0V / 120V</div>
+                            <div class="flex gap-3 my-2">
+                                <button class="breaker-btn bg-stone-800 border border-stone-600 px-4 py-3 rounded text-sm text-stone-300 transition-colors" data-val="60">SW 1 (+60V)</button>
+                                <button class="breaker-btn bg-stone-800 border border-stone-600 px-4 py-3 rounded text-sm text-stone-300 transition-colors" data-val="40">SW 2 (+40V)</button>
+                                <button class="breaker-btn bg-stone-800 border border-stone-600 px-4 py-3 rounded text-sm text-stone-300 transition-colors" data-val="20">SW 3 (+20V)</button>
+                            </div>
+                            <button id="sub-breaker" class="px-5 py-2 bg-red-800 hover:bg-red-700 text-white font-bold rounded text-xs transition-colors">SUBMIT VOLTAGE</button>
+                        </div>
+                    `;
+                    
+                    const updateVoltageSum = () => {
+                        let total = 0;
+                        document.querySelectorAll('.breaker-btn').forEach(btn => {
+                            if (btn.classList.contains('bg-red-900')) {
+                                total += parseInt(btn.dataset.val, 10);
+                            }
+                        });
+                        document.getElementById('voltage-display').innerText = `${total}V / 120V`;
+                        return total;
+                    };
+
+                    document.querySelectorAll('.breaker-btn').forEach(btn => {
+                        btn.onclick = () => {
+                            btn.classList.toggle('bg-red-900');
+                            btn.classList.toggle('border-red-500');
+                            btn.classList.toggle('text-white');
+                            updateVoltageSum();
+                        };
+                    });
+
+                    document.getElementById('sub-breaker').onclick = () => {
+                        const currentVolt = updateVoltageSum();
+                        if (currentVolt === 120) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(20);
+                        }
+                    };
+                    break;
+
+                case 'cipher':
+                    title.innerText = "GRAFFITI DIAL CIPHER";
+                    instructions.innerText = "Set dials to spell 'FL2'. Incorrect submission damages sanity.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-4 w-full">
+                            <div class="flex gap-3 items-center justify-center w-full">
+                                <button id="dial-1" class="w-14 h-14 bg-stone-800 border border-red-500/50 rounded-xl text-xl font-bold text-red-400">A</button>
+                                <button id="dial-2" class="w-14 h-14 bg-stone-800 border border-red-500/50 rounded-xl text-xl font-bold text-red-400">X</button>
+                                <button id="dial-3" class="w-14 h-14 bg-stone-800 border border-red-500/50 rounded-xl text-xl font-bold text-red-400">0</button>
+                            </div>
+                            <button id="sub-cipher" class="px-5 py-2 bg-red-800 rounded text-xs">VERIFY CIPHER</button>
+                        </div>
+                    `;
+                    const letters1 = ['A', 'F', 'K'];
+                    const letters2 = ['X', 'L', 'P'];
+                    const letters3 = ['0', '2', '9'];
+                    let idx1 = 0, idx2 = 0, idx3 = 0;
+                    const d1 = document.getElementById('dial-1');
+                    const d2 = document.getElementById('dial-2');
+                    const d3 = document.getElementById('dial-3');
+
+                    d1.onclick = () => { idx1 = (idx1 + 1) % letters1.length; d1.innerText = letters1[idx1]; };
+                    d2.onclick = () => { idx2 = (idx2 + 1) % letters2.length; d2.innerText = letters2[idx2]; };
+                    d3.onclick = () => { idx3 = (idx3 + 1) % letters3.length; d3.innerText = letters3[idx3]; };
+
+                    document.getElementById('sub-cipher').onclick = () => {
+                        if (d1.innerText.trim() === 'F' && d2.innerText.trim() === 'L' && d3.innerText.trim() === '2') {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(20);
+                        }
+                    };
+                    break;
+
+                case 'orb':
+                    title.innerText = "HARMONIC RESONATOR";
+                    instructions.innerText = "Adjust slider to exactly 440Hz and click LOCK.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-4 w-full">
+                            <div id="freq-val" class="text-xl font-mono text-emerald-400">200 Hz</div>
+                            <input type="range" id="freq-range" min="100" max="600" value="200" class="w-full accent-emerald-500">
+                            <button id="sub-orb" class="px-5 py-2 bg-emerald-800 text-white rounded text-xs">LOCK HARMONIC</button>
+                        </div>
+                    `;
+                    const range = document.getElementById('freq-range');
+                    const freqVal = document.getElementById('freq-val');
+                    range.oninput = (e) => freqVal.innerText = `${e.target.value} Hz`;
+                    document.getElementById('sub-orb').onclick = () => {
+                        if (parseInt(range.value) === 440) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(15);
+                        }
+                    };
+                    break;
+
+                case 'mirrors':
+                    title.innerText = "MIRROR BEAM ALIGNMENT";
+                    instructions.innerText = "Set light angle to 180°.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-3 w-full">
+                            <button id="mirror-btn" class="px-6 py-3 bg-stone-800 border border-stone-600 rounded-lg text-lg text-red-400 font-bold">ANGLE: 45°</button>
+                            <button id="sub-mirror" class="px-5 py-2 bg-red-800 text-xs rounded">SUBMIT ANGLE</button>
+                        </div>
+                    `;
+                    let angle = 45;
+                    const mBtn = document.getElementById('mirror-btn');
+                    mBtn.onclick = () => {
+                        angle = (angle + 45) % 360;
+                        mBtn.innerText = `ANGLE: ${angle}°`;
+                    };
+                    document.getElementById('sub-mirror').onclick = () => {
+                        if (angle === 180) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(20);
+                        }
+                    };
+                    break;
+
+                case 'circuit':
+                    title.innerText = "CIRCUIT NODE BYPASS";
+                    instructions.innerText = "Connect nodes in order: 1 -> 2 -> 3";
+                    content.innerHTML = `
+                        <div class="flex gap-4 justify-center w-full">
+                            <button class="node-btn w-12 h-12 bg-stone-800 border border-stone-600 rounded-full font-bold text-stone-300" data-num="2">2</button>
+                            <button class="node-btn w-12 h-12 bg-stone-800 border border-stone-600 rounded-full font-bold text-stone-300" data-num="1">1</button>
+                            <button class="node-btn w-12 h-12 bg-stone-800 border border-stone-600 rounded-full font-bold text-stone-300" data-num="3">3</button>
+                        </div>
+                    `;
+                    let seq = [];
+                    document.querySelectorAll('.node-btn').forEach(btn => {
+                        btn.onclick = () => {
+                            btn.classList.add('bg-red-800', 'border-red-400');
+                            seq.push(btn.dataset.num);
+                            if (seq.length >= 3) {
+                                if (seq.join('') === '123') {
+                                    solveCurrentPuzzle(floor);
+                                } else {
+                                    seq = [];
+                                    damageSanity(20);
+                                    document.querySelectorAll('.node-btn').forEach(b => b.classList.remove('bg-red-800', 'border-red-400'));
+                                }
+                            }
+                        };
+                    });
+                    break;
+
+                case 'valves':
+                    title.innerText = "PRESSURE RELEASE VALVES";
+                    instructions.innerText = "Press valves in correct order: RED -> BLUE -> YELLOW";
+                    content.innerHTML = `
+                        <div class="flex gap-3 justify-center w-full">
+                            <button class="valve-btn px-4 py-3 bg-red-800 rounded font-bold" data-color="RED">RED</button>
+                            <button class="valve-btn px-4 py-3 bg-blue-800 rounded font-bold" data-color="BLUE">BLUE</button>
+                            <button class="valve-btn px-4 py-3 bg-amber-600 rounded font-bold" data-color="YELLOW">YELLOW</button>
+                        </div>
+                    `;
+                    let vSeq = [];
+                    document.querySelectorAll('.valve-btn').forEach(b => {
+                        b.onclick = () => {
+                            vSeq.push(b.dataset.color);
+                            if (vSeq.length === 3) {
+                                if (vSeq.join('-') === 'RED-BLUE-YELLOW') {
+                                    solveCurrentPuzzle(floor);
+                                } else {
+                                    vSeq = [];
+                                    damageSanity(25);
+                                }
+                            }
+                        };
+                    });
+                    break;
+
+                case 'keypad':
+                    title.innerText = "MEMORY MATRIX KEYPAD";
+                    instructions.innerText = "Input security passcode: 8 - 4 - 2";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-3">
+                            <div id="keypad-disp" class="text-2xl font-mono bg-black px-6 py-1 border border-stone-700">_ _ _</div>
+                            <div class="grid grid-cols-3 gap-2">
+                                <button class="kp-num p-3 bg-stone-800 rounded font-bold">2</button>
+                                <button class="kp-num p-3 bg-stone-800 rounded font-bold">4</button>
+                                <button class="kp-num p-3 bg-stone-800 rounded font-bold">8</button>
+                            </div>
+                        </div>
+                    `;
+                    let kpInputs = [];
+                    document.querySelectorAll('.kp-num').forEach(b => {
+                        b.onclick = () => {
+                            kpInputs.push(b.innerText);
+                            document.getElementById('keypad-disp').innerText = kpInputs.join(' ');
+                            if (kpInputs.length === 3) {
+                                if (kpInputs.join('') === '842') {
+                                    solveCurrentPuzzle(floor);
+                                } else {
+                                    kpInputs = [];
+                                    damageSanity(20);
+                                    document.getElementById('keypad-disp').innerText = '_ _ _';
+                                }
+                            }
+                        };
+                    });
+                    break;
+
+                case 'pendulum':
+                    title.innerText = "ECHO PENDULUM SYNC";
+                    instructions.innerText = "Click 'STOP' when the pendulum reaches center (50%).";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-4 w-full">
+                            <div class="w-full bg-stone-900 h-6 rounded border border-stone-700 relative overflow-hidden">
+                                <div id="pendulum-bar" class="w-3 h-full bg-red-500 absolute top-0"></div>
+                            </div>
+                            <button id="btn-pendulum" class="px-6 py-2 bg-red-700 text-white rounded text-xs">STOP PENDULUM</button>
+                        </div>
+                    `;
+                    let pPos = 0;
+                    let pDir = 2;
+                    const pBar = document.getElementById('pendulum-bar');
+                    const pInterval = setInterval(() => {
+                        if (!isPuzzleOpen) { clearInterval(pInterval); return; }
+                        pPos += pDir;
+                        if (pPos >= 95 || pPos <= 0) pDir *= -1;
+                        pBar.style.left = `${pPos}%`;
+                    }, 20);
+
+                    document.getElementById('btn-pendulum').onclick = () => {
+                        clearInterval(pInterval);
+                        if (pPos >= 40 && pPos <= 60) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(25);
+                        }
+                    };
+                    break;
+
+                case 'phasewave':
+                    title.innerText = "PHASE WAVE ALIGNER";
+                    instructions.innerText = "Set Amplitude to 50 and Phase Shift to 0°.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-3 w-full">
+                            <div id="phase-disp" class="text-sm font-mono text-cyan-400">AMP: 10 | PHASE: 90°</div>
+                            <input type="range" id="amp-range" min="0" max="100" value="10" class="w-full accent-cyan-500">
+                            <button id="btn-phase" class="px-4 py-2 bg-stone-800 border border-stone-600 rounded text-xs">SHIFT PHASE (90°)</button>
+                            <button id="sub-phase" class="px-5 py-2 bg-cyan-800 text-white rounded text-xs mt-2">LOCK WAVE</button>
+                        </div>
+                    `;
+                    let amp = 10;
+                    let phaseDeg = 90;
+                    const ampR = document.getElementById('amp-range');
+                    const phaseDisp = document.getElementById('phase-disp');
+                    ampR.oninput = (e) => { amp = parseInt(e.target.value); phaseDisp.innerText = `AMP: ${amp} | PHASE: ${phaseDeg}°`; };
+                    document.getElementById('btn-phase').onclick = () => {
+                        phaseDeg = (phaseDeg + 90) % 360;
+                        phaseDisp.innerText = `AMP: ${amp} | PHASE: ${phaseDeg}°`;
+                    };
+                    document.getElementById('sub-phase').onclick = () => {
+                        if (amp >= 45 && amp <= 55 && phaseDeg === 0) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(20);
+                        }
+                    };
+                    break;
+
+                case 'morse':
+                    title.innerText = "MORSE CODE DECODER";
+                    instructions.innerText = "Decode signal: • • • (S.O.S sequence: S - O - S)";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-3 w-full">
+                            <div id="morse-disp" class="text-xl font-mono text-amber-400 font-bold">_ _ _</div>
+                            <div class="flex gap-2">
+                                <button class="morse-btn px-4 py-2 bg-stone-800 rounded font-bold" data-char="S">S</button>
+                                <button class="morse-btn px-4 py-2 bg-stone-800 rounded font-bold" data-char="O">O</button>
+                                <button class="morse-btn px-4 py-2 bg-stone-800 rounded font-bold" data-char="X">X</button>
+                            </div>
+                        </div>
+                    `;
+                    let mSeq = [];
+                    document.querySelectorAll('.morse-btn').forEach(b => {
+                        b.onclick = () => {
+                            mSeq.push(b.dataset.char);
+                            document.getElementById('morse-disp').innerText = mSeq.join(' ');
+                            if (mSeq.length === 3) {
+                                if (mSeq.join('') === 'SOS') {
+                                    solveCurrentPuzzle(floor);
+                                } else {
+                                    mSeq = [];
+                                    damageSanity(20);
+                                    document.getElementById('morse-disp').innerText = '_ _ _';
+                                }
+                            }
+                        };
+                    });
+                    break;
+
+                case 'uvscan':
+                    title.innerText = "UV SPECTRUM SCANNER";
+                    instructions.innerText = "Filter UV wavelength to 365nm.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-3 w-full">
+                            <div id="uv-disp" class="text-lg font-mono text-purple-400">200 nm</div>
+                            <input type="range" id="uv-range" min="100" max="500" value="200" class="w-full accent-purple-500">
+                            <button id="sub-uv" class="px-5 py-2 bg-purple-800 text-white rounded text-xs">APPLY FILTER</button>
+                        </div>
+                    `;
+                    const uvR = document.getElementById('uv-range');
+                    const uvDisp = document.getElementById('uv-disp');
+                    uvR.oninput = (e) => uvDisp.innerText = `${e.target.value} nm`;
+                    document.getElementById('sub-uv').onclick = () => {
+                        if (Math.abs(parseInt(uvR.value) - 365) <= 10) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(20);
+                        }
+                    };
+                    break;
+
+                case 'gravity':
+                    title.innerText = "GRAVITATIONAL VECTOR DIAL";
+                    instructions.innerText = "Set vector dial to 1.0G (Normal Earth Gravity).";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-3 w-full">
+                            <div id="grav-disp" class="text-xl font-mono text-blue-400">0.2G</div>
+                            <button id="btn-grav" class="px-6 py-2 bg-stone-800 border border-stone-600 rounded text-sm">INCREASE VECTOR (+0.4G)</button>
+                            <button id="sub-grav" class="px-5 py-2 bg-blue-800 text-white rounded text-xs mt-2">LOCK VECTOR</button>
+                        </div>
+                    `;
+                    let gravVal = 0.2;
+                    document.getElementById('btn-grav').onclick = () => {
+                        gravVal = Math.round((gravVal + 0.4) * 10) / 10;
+                        if (gravVal > 2.0) gravVal = 0.2;
+                        document.getElementById('grav-disp').innerText = `${gravVal}G`;
+                    };
+                    document.getElementById('sub-grav').onclick = () => {
+                        if (gravVal === 1.0) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(25);
+                        }
+                    };
+                    break;
+
+                case 'oxygen':
+                    title.innerText = "OXYGEN SCRUBBER PANEL";
+                    instructions.innerText = "Press switches in order: SCRUB -> VENT -> PURGE";
+                    content.innerHTML = `
+                        <div class="flex gap-2 justify-center w-full">
+                            <button class="o2-btn px-3 py-2 bg-stone-800 rounded text-xs font-bold" data-act="PURGE">PURGE</button>
+                            <button class="o2-btn px-3 py-2 bg-stone-800 rounded text-xs font-bold" data-act="SCRUB">SCRUB</button>
+                            <button class="o2-btn px-3 py-2 bg-stone-800 rounded text-xs font-bold" data-act="VENT">VENT</button>
+                        </div>
+                    `;
+                    let o2Seq = [];
+                    document.querySelectorAll('.o2-btn').forEach(b => {
+                        b.onclick = () => {
+                            o2Seq.push(b.dataset.act);
+                            if (o2Seq.length === 3) {
+                                if (o2Seq.join('-') === 'SCRUB-VENT-PURGE') {
+                                    solveCurrentPuzzle(floor);
+                                } else {
+                                    o2Seq = [];
+                                    damageSanity(20);
+                                }
+                            }
+                        };
+                    });
+                    break;
+
+                case 'quantum':
+                    title.innerText = "QUANTUM FLUX TRAP";
+                    instructions.innerText = "Click 'TRAP' when flux reaches 0.00.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-4 w-full">
+                            <div id="q-disp" class="text-2xl font-mono text-emerald-400 font-black">+1.50</div>
+                            <button id="btn-q" class="px-6 py-2 bg-emerald-800 text-white rounded text-xs">TRAP FLUX</button>
+                        </div>
+                    `;
+                    let qVal = 1.50;
+                    const qInterval = setInterval(() => {
+                        if (!isPuzzleOpen) { clearInterval(qInterval); return; }
+                        qVal -= 0.10;
+                        if (qVal < -1.50) qVal = 1.50;
+                        document.getElementById('q-disp').innerText = (qVal >= 0 ? '+' : '') + qVal.toFixed(2);
+                    }, 100);
+                    document.getElementById('btn-q').onclick = () => {
+                        clearInterval(qInterval);
+                        if (Math.abs(qVal) <= 0.15) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(25);
+                        }
+                    };
+                    break;
+
+                case 'thermal':
+                    title.innerText = "THERMAL CORE REGULATOR";
+                    instructions.innerText = "Cool the core temperature down to 20°C.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-3 w-full">
+                            <div id="temp-disp" class="text-2xl font-black text-red-500">80°C</div>
+                            <button id="btn-cool" class="px-6 py-3 bg-blue-900 border border-blue-500 rounded text-white text-xs font-bold">COOL (-15°C)</button>
+                            <button id="sub-temp" class="px-5 py-2 bg-red-800 text-white rounded text-xs">CONFIRM TEMP</button>
+                        </div>
+                    `;
+                    let temp = 80;
+                    document.getElementById('btn-cool').onclick = () => {
+                        temp -= 15;
+                        if (temp < 5) temp = 80;
+                        document.getElementById('temp-disp').innerText = `${temp}°C`;
+                    };
+                    document.getElementById('sub-temp').onclick = () => {
+                        if (temp === 20) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(20);
+                        }
+                    };
+                    break;
+
+                case 'chronometer':
+                    title.innerText = "CHRONOMETER LOCK";
+                    instructions.innerText = "Stop time exactly at 00:00.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-4 w-full">
+                            <div id="chrono-disp" class="text-3xl font-mono text-red-400 font-bold">00:05</div>
+                            <button id="btn-chrono" class="px-6 py-2 bg-red-800 text-white rounded text-xs">STOP CLOCK</button>
+                        </div>
+                    `;
+                    let cTime = 5;
+                    const cInterval = setInterval(() => {
+                        if (!isPuzzleOpen) { clearInterval(cInterval); return; }
+                        cTime--;
+                        if (cTime < -5) cTime = 5;
+                        document.getElementById('chrono-disp').innerText = `00:${cTime < 0 ? '00' : '0' + cTime}`;
+                    }, 300);
+                    document.getElementById('btn-chrono').onclick = () => {
+                        clearInterval(cInterval);
+                        if (cTime === 0) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(25);
+                        }
+                    };
+                    break;
+
+                case 'neuralgrid':
+                    title.innerText = "NEURAL MATRIX MATCH";
+                    instructions.innerText = "Select button 'B' to restore neural harmony.";
+                    content.innerHTML = `
+                        <div class="flex gap-3 justify-center w-full">
+                            <button class="ng-btn px-5 py-3 bg-stone-800 rounded font-bold" data-val="A">A</button>
+                            <button class="ng-btn px-5 py-3 bg-stone-800 rounded font-bold" data-val="B">B</button>
+                            <button class="ng-btn px-5 py-3 bg-stone-800 rounded font-bold" data-val="C">C</button>
+                        </div>
+                    `;
+                    document.querySelectorAll('.ng-btn').forEach(b => {
+                        b.onclick = () => {
+                            if (b.dataset.val === 'B') {
+                                solveCurrentPuzzle(floor);
+                            } else {
+                                damageSanity(20);
+                            }
+                        };
+                    });
+                    break;
+
+                case 'equalizer':
+                    title.innerText = "ACOUSTIC EQUALIZER";
+                    instructions.innerText = "Raise BASS slider to 100%.";
+                    content.innerHTML = `
+                        <div class="flex flex-col items-center gap-3 w-full">
+                            <div id="eq-disp" class="text-lg font-mono text-amber-400">BASS: 20%</div>
+                            <input type="range" id="eq-range" min="0" max="100" value="20" class="w-full accent-amber-500">
+                            <button id="sub-eq" class="px-5 py-2 bg-amber-800 text-white rounded text-xs">LOCK EQ</button>
+                        </div>
+                    `;
+                    const eqR = document.getElementById('eq-range');
+                    const eqDisp = document.getElementById('eq-disp');
+                    eqR.oninput = (e) => eqDisp.innerText = `BASS: ${e.target.value}%`;
+                    document.getElementById('sub-eq').onclick = () => {
+                        if (parseInt(eqR.value) === 100) {
+                            solveCurrentPuzzle(floor);
+                        } else {
+                            damageSanity(20);
+                        }
+                    };
+                    break;
+
+                default:
+                    title.innerText = "FINAL OVERRIDE CORE";
+                    instructions.innerText = "Confirm descent into the void terminal.";
+                    content.innerHTML = `
+                        <button id="btn-override" class="px-6 py-3 bg-red-700 hover:bg-red-600 text-white font-bold rounded-xl tracking-wider text-xs">INITIATE FINAL OVERRIDE</button>
+                    `;
+                    document.getElementById('btn-override').onclick = () => {
+                        solveCurrentPuzzle(floor);
+                    };
+                    break;
+            }
+        }
+
+        function closePuzzleModal() {
+            isPuzzleOpen = false;
+            document.getElementById('puzzle-modal').classList.add('hidden');
+        }
+
+        function solveCurrentPuzzle(floor) {
+            floor.anomalySolved = true;
+            floor.doorLocked = false;
+            audio.playAnomalyDiscovered();
+            document.getElementById('puzzle-status').innerText = "PUZZLE SOLVED! DOOR UNLOCKED.";
+            document.getElementById('puzzle-status').className = "text-xs font-bold text-center h-5 text-emerald-400 tracking-wider";
+            setTimeout(() => {
+                closePuzzleModal();
+                updateHUDStatus(`ANOMALY RESOLVED! (${floor.anomalyMessage}) Door Unlocked.`);
+            }, 800);
+        }
+
+        document.getElementById('close-puzzle-btn').addEventListener('click', closePuzzleModal);
+
+        function descendToNextFloor() {
+            currentFloor++;
+            document.getElementById('floor-indicator').innerText = `FLOOR ${currentFloor}`;
+            audio.updateAmbient(currentFloor);
+
+            player.x = 120;
+            updateHUDStatus("STATUS: DOOR LOCKED — LOCATE FLOOR ANOMALY");
+
+            if (currentFloor >= TOTAL_FLOORS) {
+                triggerGameOver("THE BOTTOM REACHED", "You inspected every anomaly and descended past where the floor plan ends. You are stranded below ground in complete isolation.");
+            }
+        }
+
+        function triggerGameOver(titleText, descText) {
+            isGameOver = true;
+            document.getElementById('end-title').innerText = titleText;
+            document.getElementById('end-desc').innerText = descText;
+            document.getElementById('end-screen').classList.remove('hidden');
+        }
+
+        /* --- CONTROL BINDINGS --- */
+        function setupControls() {
+            // Keyboard controls
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.Left = true;
+                if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.Right = true;
+                if (e.code === 'KeyE' || e.code === 'Space') {
+                    e.preventDefault();
+                    handleInteraction();
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.Left = false;
+                if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.Right = false;
+            });
+
+            // On-screen touch button controls for mobile
+            const btnLeft = document.getElementById('btn-left');
+            const btnRight = document.getElementById('btn-right');
+            const btnAction = document.getElementById('btn-action');
+            const mobileControls = document.getElementById('mobile-controls');
+
+            // Detect touch device
+            if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+                mobileControls.classList.remove('hidden');
+            }
+
+            const bindTouchBtn = (btn, keyName) => {
+                btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[keyName] = true; });
+                btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[keyName] = false; });
+                btn.addEventListener('mousedown', () => { keys[keyName] = true; });
+                btn.addEventListener('mouseup', () => { keys[keyName] = false; });
+            };
+
+            bindTouchBtn(btnLeft, 'Left');
+            bindTouchBtn(btnRight, 'Right');
+
+            btnAction.addEventListener('click', (e) => {
+                e.preventDefault();
+                handleInteraction();
+            });
+
+            // Click prompt banner to interact
+            document.getElementById('interactive-prompt').addEventListener('click', handleInteraction);
+        }
+
+        /* --- RENDERING PIPELINE --- */
+        let timeGlobal = 0;
+
+        function drawScene() {
+            const floor = getFloor(currentFloor);
+            const groundY = canvas.height - GROUND_Y_OFFSET;
+            player.y = groundY - player.height;
+
+            // Camera follow (Horizontal scrolling centered on player)
+            const cameraX = Math.max(0, Math.min(LEVEL_WIDTH - canvas.width, player.x - canvas.width / 2));
+
+            ctx.save();
+            ctx.translate(-cameraX, 0);
+
+            // 1. Background & Walls
+            ctx.fillStyle = floor.crimson ? '#1a0505' : '#0c0c10';
+            ctx.fillRect(0, 0, LEVEL_WIDTH, canvas.height);
+
+            // Concrete Wall Tiles Pattern
+            ctx.strokeStyle = floor.crimson ? 'rgba(80, 20, 20, 0.25)' : 'rgba(255, 255, 255, 0.04)';
+            ctx.lineWidth = 2;
+            const tileSize = 80;
+            for (let x = 0; x < LEVEL_WIDTH; x += tileSize) {
+                for (let y = 0; y < groundY; y += tileSize) {
+                    ctx.strokeRect(x, y, tileSize, tileSize);
+                }
+            }
+
+            // 2. Stairs Backdrop (Descending stair steps leading down at right end)
+            ctx.fillStyle = '#111116';
+            ctx.beginPath();
+            ctx.moveTo(980, groundY);
+            ctx.lineTo(LEVEL_WIDTH, groundY + 120);
+            ctx.lineTo(LEVEL_WIDTH, canvas.height);
+            ctx.lineTo(980, canvas.height);
+            ctx.closePath();
+            ctx.fill();
+
+            // 3. Landing Floor & Baseboard
+            ctx.fillStyle = '#1c1c22';
+            ctx.fillRect(0, groundY, LEVEL_WIDTH, canvas.height - groundY);
+
+            ctx.fillStyle = '#dc2626';
+            ctx.fillRect(0, groundY - 6, LEVEL_WIDTH, 6); // Yellow/Red warning stripe line
+
+            // 4. Floor Sign Stencil
+            ctx.save();
+            ctx.translate(floor.signX, groundY - 140);
+            if (currentFloor === 1) ctx.scale(1, -1); // Upside-down anomaly
+            ctx.fillStyle = '#09090b';
+            ctx.fillRect(-10, -35, 160, 50);
+            ctx.strokeStyle = '#dc2626';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(-10, -35, 160, 50);
+
+            ctx.fillStyle = '#dc2626';
+            ctx.font = 'bold 22px "VT323", monospace';
+            ctx.fillText(floor.signText, 0, 0);
+            ctx.restore();
+
+            // 6. Floor Anomaly Renderings
+            renderAnomaly(floor, groundY);
+
+            // 7. Threshold Exit Door
+            ctx.save();
+            ctx.translate(floor.doorX, groundY - 120);
+
+            // Door Frame
+            ctx.fillStyle = '#18181b';
+            ctx.fillRect(-5, -5, 60, 125);
+
+            // Door Body
+            ctx.fillStyle = floor.doorOpened ? '#09090b' : '#27272a';
+            ctx.fillRect(0, 0, floor.doorOpened ? 12 : 50, 120);
+
+            // Door Handle
+            if (!floor.doorOpened) {
+                ctx.fillStyle = '#9ca3af';
+                ctx.fillRect(8, 62, 10, 5);
+                // Lock status LED
+                ctx.fillStyle = floor.doorLocked ? '#ef4444' : '#22c55e';
+                ctx.fillRect(10, 52, 6, 6);
+            }
+            ctx.restore();
+
+            // 8. Player Rendering & Flashlight Beam
+            renderPlayer(groundY);
+
+            // 9. Environmental Fog / Horror Overlays
+            if (floor.foggy) {
+                ctx.fillStyle = `rgba(16, 185, 129, ${0.08 + Math.sin(timeGlobal * 2) * 0.03})`;
+                ctx.fillRect(cameraX, 0, canvas.width, canvas.height);
+            }
+
+            ctx.restore();
+        }
+
+        function renderAnomaly(floor, groundY) {
+            const ax = floor.anomalyX;
+            const ay = groundY - 80;
+
+            ctx.save();
+            if (floor.anomalyType === 'keycard') {
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(ax - 20, ay, 40, 55);
+                ctx.strokeStyle = '#38bdf8';
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(ax - 16, ay + 4, 32, 46);
+            } else if (floor.anomalyType === 'breaker') {
+                ctx.fillStyle = '#d97706';
+                ctx.fillRect(ax - 15, ay + 10, 30, 45);
+                // Sparks when unsolved
+                if (!floor.anomalySolved && Math.random() < 0.3) {
+                    ctx.fillStyle = '#fef08a';
+                    ctx.fillRect(ax + (Math.random() * 20 - 10), ay + 20, 4, 4);
+                }
+            } else if (floor.anomalyType === 'cipher') {
+                ctx.fillStyle = '#0284c7';
+                ctx.fillRect(ax - 22, ay - 10, 44, 60);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '10px monospace';
+                ctx.fillText(floor.anomalySolved ? "VERIFIED" : "SHIFTING", ax - 20, ay + 20);
+            } else if (floor.anomalyType === 'orb') {
+                const orbY = ay + Math.sin(timeGlobal * 3) * 12;
+                const grad = ctx.createRadialGradient(ax, orbY, 2, ax, orbY, 24);
+                grad.addColorStop(0, '#6ee7b7');
+                grad.addColorStop(1, 'rgba(5, 150, 105, 0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(ax, orbY, 24, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (floor.anomalyType === 'mirrors') {
+                ctx.strokeStyle = '#a855f7';
+                ctx.lineWidth = 4;
+                ctx.strokeRect(ax - 20, ay - 20, 40, 70);
+            } else if (floor.anomalyType === 'circuit') {
+                ctx.fillStyle = '#3b82f6';
+                ctx.fillRect(ax - 18, ay, 36, 60);
+            } else if (floor.anomalyType === 'terminal') {
+                ctx.fillStyle = '#7f1d1d';
+                ctx.fillRect(ax - 18, ay, 36, 60);
+                ctx.fillStyle = '#ef4444';
+                ctx.fillRect(ax - 12, ay + 8, 24, 18);
+            }
+            ctx.restore();
+        }
+
+        function renderPlayer(groundY) {
+            const px = player.x;
+            const py = player.y;
+
+            ctx.save();
+
+            // Flashlight Spotlight Cone
+            const torchDir = player.facingLeft ? -1 : 1;
+            const torchX = px + (player.facingLeft ? 4 : player.width - 4);
+            const torchY = py + 24;
+
+            const torchGrad = ctx.createRadialGradient(torchX, torchY, 4, torchX + torchDir * 240, torchY, 180);
+            torchGrad.addColorStop(0, 'rgba(255, 255, 230, 0.45)');
+            torchGrad.addColorStop(1, 'rgba(0,0,0,0)');
+
+            ctx.fillStyle = torchGrad;
+            ctx.beginPath();
+            ctx.moveTo(torchX, torchY);
+            ctx.lineTo(torchX + torchDir * 280, torchY - 80);
+            ctx.lineTo(torchX + torchDir * 280, torchY + 120);
+            ctx.closePath();
+            ctx.fill();
+
+            // Player Silhouette Character Sprite
+            ctx.fillStyle = '#020617';
+            ctx.fillRect(px, py, player.width, player.height); // Main body
+
+            // Trench coat / outfit details
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(px + 4, py + 18, player.width - 8, 30);
+
+            // Head & Eyes
+            ctx.fillStyle = '#334155';
+            ctx.fillRect(px + 6, py + 4, 16, 14);
+
+            // Glowing Flashlight Lens
+            ctx.fillStyle = '#fef08a';
+            ctx.fillRect(torchX - 2, torchY - 2, 4, 4);
+
+            // Simple Walking Leg Animation
+            if (player.isMoving) {
+                const legOffset = Math.sin(player.animTimer * 12) * 8;
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(px + 4, py + 48, 8, 16 + legOffset);
+                ctx.fillRect(px + 16, py + 48, 8, 16 - legOffset);
+            } else {
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(px + 4, py + 48, 8, 16);
+                ctx.fillRect(px + 16, py + 48, 8, 16);
+            }
+
+            ctx.restore();
+        }
+
+        /* --- GAME LOOP & UPDATE --- */
+        let lastTime = 0;
+
+        function update(delta) {
+            if (!isStarted || isGameOver) return;
+
+            player.isMoving = false;
+            player.vx = 0;
+
+            if (keys.Left) {
+                player.vx = -player.speed;
+                player.facingLeft = true;
+                player.isMoving = true;
+            } else if (keys.Right) {
+                player.vx = player.speed;
+                player.facingLeft = false;
+                player.isMoving = true;
+            }
+
+            player.x += player.vx;
+
+            // Boundary limits
+            player.x = Math.max(40, Math.min(LEVEL_WIDTH - 80, player.x));
+
+            if (player.isMoving) {
+                player.animTimer += delta;
+                if (Math.sin(player.animTimer * 12) > 0.9) {
+                    audio.playFootstep(currentFloor);
+                }
+            }
+
+            checkInteractions();
+        }
+
+        function gameLoop(timestamp) {
+            const delta = Math.min((timestamp - lastTime) / 1000, 0.1);
+            lastTime = timestamp;
+            timeGlobal += delta;
+
+            update(delta);
+            drawScene();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        /* --- INITIALIZATION --- */
+        document.getElementById('start-btn').addEventListener('click', () => {
+            audio.init();
+            document.getElementById('start-screen').classList.add('opacity-0');
+            setTimeout(() => {
+                document.getElementById('start-screen').classList.add('hidden');
+            }, 700);
+
+            isStarted = true;
+            updateHUDStatus("STATUS: DOOR LOCKED — LOCATE FLOOR ANOMALY");
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', () => {
+            window.location.reload();
+        });
+
+        setupControls();
+        requestAnimationFrame(gameLoop);
+
+    </script>
+</body>
+</html>
