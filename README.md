@@ -1,2 +1,2 @@
-Two Flights Down is a gmae bring you down eahc floor. Solve and fix the system to the door to unlock, one wrong move and you lose health. Find a med kit and use it to heal yourself. The ultimate goal to to make it to the end if you can. 
+Two Flights Down is a gmae bring you down eahc floor. Solve and fix the system to the door to unlock, one wrong move and you lose health. Find a med kit and use it to heal yourself. The ultimate goal to to make it to the end if you can. Runs via a html and is hosted by Vercel.
 <img width="1915" height="820" alt="Screenshot 2026-11-02 085051" src="https://github.com/user-attachments/assets/a6987bde-f337-4011-9278-10302e57eac1" />
