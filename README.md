@@ -1,1 +1,4 @@
 Two Flights Down is a tense, 2D side-scrolling psychological horror game where you descend through a 20-floor subterranean stairwell where reality progressively unravels. To unlock the threshold door on each floor and proceed deeper, you must inspect and resolve floor-specific spatial anomaly puzzles—ranging from voltage breaker balancing and morse code decoding to gravity vector alignment—while managing a fragile Sanity Stability meter. Featuring retro pixel-art aesthetic, dynamic CRT scanline visuals, procedural synthesizer audio, scavengable med kits, and intuitive cross-platform controls, the game delivers an atmospheric experience focused on paranoia, claustrophobia, and cold isolation.
+
+
+<img width="1915" height="820" alt="Screenshot 2026-11-02 085051" src="https://github.com/user-attachments/assets/a6987bde-f337-4011-9278-10302e57eac1" />
